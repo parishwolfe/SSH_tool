@@ -1,6 +1,7 @@
 ##################################
 #     SSH Tool                   #
-#     open source                #
+#     MIT license open source    #
+#     author: Parish Wolfe       #
 ##################################
 
 #global variables
@@ -21,7 +22,7 @@ except ModuleNotFoundError:
     #https://ktbyers.github.io/netmiko/docs/netmiko/index.html
 import os
 import logging
-import threading
+import multiprocessing
 import argparse
 parser = argparse.ArgumentParser(description="run ssh commands against servers")
 parser.add_argument("-c", "--command", help="command to run against server(s)")
@@ -29,7 +30,8 @@ parser.add_argument("-C", "--commands", help="line feed delimited list of comman
 parser.add_argument("-s", "--server", help="single server to run command(s) against")
 parser.add_argument("-L", "--servers", help="line feed delimited list of servers to run command(s) against")
 parser.add_argument("-o", "--output", help="file to write output to")
-#parser.add_argument("-e", "--expand", help="separate output into different files per server")
+parser.add_argument("-q", "-concurrency", help="set the concurrency, default: 5")
+#parser.add_argument("-a", "--amalgamate", help="conbine output into one file")
 options = parser.parse_args()
 
 #collect credentials
@@ -49,6 +51,11 @@ log_file = "SSH_tool.log"
 if options.output:
     log_file = str(options.output)
 logging.basicConfig(level=logging.INFO, filename=log_file)
+try:
+    concurrency = int(options.concurrency)
+except ValueError as e:
+    print("concurrency must be a number")
+    exit()
 #/import statements
 
 #global functions
@@ -68,30 +75,28 @@ def append_file(command, output):
     logging.info(f"command: {command}\noutput: {output}\n")
     return
 
-def thread_helper(thread_list):
+def process_helper(process_list):
     count = 0
-    while len(thread_list) > count:
+    while len(process_list) > count:
         if count % concurrency == 0 and count!= 0:
             for j in range(concurrency):
-                thread_list[count-(j+1)].join()
-        thread_list[count].start()
+                process_list[count-(j+1)].join()
+        process_list[count].start()
         count += 1
 
 def operate_on_targets(server, commands): #server string, commands list
     client = netmiko.ConnectHandler(**server)
     host = server.get("ip")
-    print(f"Starting SSH Connection to {host}")
-    print("commands", commands)
-    print("server", server)
+    print(f"Starting SSH Connection to: {host}")
     for command in commands:
-        print(f"command sent to {host}: {command}")
-        logging.info(f"command sent to {host}: {command}")
+        print(f"command sent to {host}; {command}")
+        logging.info(f"command sent to {host}; {command}")
         output = client.send_command(command)
         #delay_factor = 1
         #max_loops = 150
         #output = client.send_command_timing(command, delay_factor, max_loops)
-        print(f"output received from {host}: {command}\n{output}")
-        logging.info(f"output received from {host}: {command}\n{output}")
+        print(f"output received from {host}; {command}\n{output}")
+        logging.info(f"output received from {host}; {command}\n{output}")
     client.disconnect()
 
 def main():
@@ -116,11 +121,10 @@ def main():
         print("you must define an operation")
         exit()
 
-    thread_list = []
-
+    process_list = []
     for server in devices:
-        thread_list.append(threading.Thread(target=operate_on_targets, args=(server, commands)))
-    thread_helper(thread_list)
+        process_list.append(multiprocessing.Process(target=operate_on_targets, args=(server, commands)))
+    process_helper(process_list)
 
 if __name__ == "__main__":
     main()
