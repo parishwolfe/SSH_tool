@@ -3,113 +3,131 @@
 #     open source                #
 ##################################
 
-#import Statements
+#global variables
+concurrency = 5
+
+#import statements
+import sys
 try:
     import netmiko
 except ModuleNotFoundError:
-    import sys
     import subprocess
 
     def install(package):
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
     
     install("netmiko")
-
-#Documentation for the netmiko module can be found at https://ktbyers.github.io/netmiko/docs/netmiko/index.html#
-import sys
+    #Documentation for the netmiko module can be found at :
+    #https://ktbyers.github.io/netmiko/docs/netmiko/index.html
 import os
+import logging
+import threading
 import argparse
 parser = argparse.ArgumentParser(description="run ssh commands against servers")
 parser.add_argument("-c", "--command", help="command to run against server(s)")
 parser.add_argument("-C", "--commands", help="line feed delimited list of commands to run against server(s)")
 parser.add_argument("-s", "--server", help="single server to run command(s) against")
-parser.add_argument("-L", "--server-list", help="line feed delmited list of servers to run command(s) against")
-parser.add_argument("-o", "--output", help=)
+parser.add_argument("-L", "--servers", help="line feed delimited list of servers to run command(s) against")
+parser.add_argument("-o", "--output", help="file to write output to")
+options = parser.parse_args()
 
-
+#collect credentials
 try:
-    import secrets
-    username = secrets.username
-    password = secrets.password
-except ImportError as e:
-    username = input("Input User Name ")
+    import secret
+    username = secret.username
+    password = secret.password
+except ModuleNotFoundError as e:
+    username = input("Username: ")
     from getpass import getpass
     password = getpass()
-    if device["password"] == '':
+    if password == '':
         print("password is blank, ensure the window has focus before pasting\n")
-        device["password"] = getpass()
+        password = getpass()
 
-
-
-
-
-
-#Data Structures
-filename = input("provide a name for the output text file: ")
-#Create file to be appended
-try:
-    open(f'{filename}.txt', 'x')
-except Exception:
-    print(f'{filename}.txt already exists. \n')
-    filename = input("Please enter a different name: ")
-
-device = {
-    "device_type" : "autodetect",
-    "ip" : input("Input Server Name: "),
-    "username" : username,
-    "password" : password
-}
-
-
-
+log_file = "SSH_tool.log"
+if options.output:
+    log_file = str(options.output)
+logging.basicConfig(level=logging.INFO, filename=log_file)
+#/import statements
 
 #global functions
-def send_command(command):
-    '''Send a command to the device'''
-    global client
-    print(f"Command sent: {command}")
-    output = client.send_command(command)
-    print(output)
-    append_file(command, output)
-    return output
+def define_targets(*args):
+    devices = []
+    for dev in args:
+        devices.append({
+        "device_type" : "autodetect",
+        "ip" : dev,
+        "username" : username,
+        "password" : password
+        })
+    return devices
 
-def send_command_w_timeout(command, delay_factor=1, max_loops=150):
-    '''Send a command to the device with a timeout included'''
-    global client
-    print(f"Command sent: {command} with timeout   {delay_factor * max_loops}")
-    output = client.send_command_timing(command, delay_factor, max_loops)
-    print(output)
-    append_file(command, output)
-    return output
+def define_operations(*args):
+    commands = []
+    for cmd in args:
+        commands.append(cmd)
+    return commands
 
 def append_file(command, output):
     '''Append the command and output to the named file'''
-    with open(f'{filename}.txt', 'a') as file:
-        file.write(f'Command sent: {command} \n')
-        file.write(output + "\n")
-        print("file write")
+    logging.info(f"command: {command}\noutput: {output}\n")
     return
 
-#Open SSH Connection
-client = netmiko.ConnectHandler(**device)
-print("Starting SSH Connection")
-# **device enters all entries of dictonary   device  as keyword arguments to netmiko.ConnectHandler
-# another connection could be created by making a device2 dictionary then client2 = netmiko.ConnectHandler(**device2)
-# This would requrie new functions, or the functions could be put into a class along with the connection setup in its __init__
+def thread_helper(thread_list):
+    #FIXME possible race conditions?
+    count = 0
+    while len(thread_list) > count:
+        if count % concurrency == 0 and count!= 0:
+            for j in range(concurrency):
+                thread_list[count-(j+1)].join()
+        thread_list[count].start()
+        count += 1
 
-#Detect and print device type then show prompt for debugging
-#detect = netmiko.SSHDetect(**device)
-#best_match = detect.autodetect()
-#print(best_match)
-#print(client.find_prompt())
+def operate_on_targets(server, commands): #server string, commands list
+    client = netmiko.ConnectHandler(**server)
+    host = server.get("host")
+    print(f"Starting SSH Connection to {host}")
+    print("commands", commands)
+    print("server", server)
+    for command in commands:
+        print(f"command sent to {host}: {command}")
+        logging.info(f"command sent to {host}: {command}")
+        output = client.send_command(command)
+        #delay_factor = 1
+        #max_loops = 150
+        #output = client.send_command_timing(command, delay_factor, max_loops)
+        print(f"output received from {host}: {command}\n{output}")
+        logging.info(f"output received from {hsot}: {command}\n{output}")
+    client.disconnect()
 
+def main():
+    #define targets
+    if options.server:
+        devices = define_targets(*options.server)
+    elif options.servers:
+        with open(str(options.servers)) as f1:
+            devices = define_targets([x.strip() for x in f1.readlines()])
+    else:
+        print("you must define a target server")
+        exit()
 
-#Sending Commands
-send_command_w_timeout('hostname', 1, 50)
-send_command('ifconfig -a')
+    #define operations
+    if options.server:
+        commands = define_targets(*options.command)
+    elif options.servers:
+        with open(str(options.commands)) as f2:
+            commands = define_targets([x.strip() for x in f2.readlines()])
+    else:
+        print("you must define an operation")
+        exit()
 
-#Close SSH Connection
-client.disconnect()
-input("Connection closed\nPress enter key to exit")
+    thread_list = []
+    for server in devices:
+        print("!!!\n", server, "\n", commands, "\n")
+        thread_list.append(threading.Thread(target=operate_on_targets, args=(server, commands)))
+    thread_helper(thread_list)
 
+if __name__ == "__main__":
+    main()
 
+#cspell:ignore netmiko
