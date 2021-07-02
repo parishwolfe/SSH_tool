@@ -29,6 +29,7 @@ parser.add_argument("-C", "--commands", help="line feed delimited list of comman
 parser.add_argument("-s", "--server", help="single server to run command(s) against")
 parser.add_argument("-L", "--servers", help="line feed delimited list of servers to run command(s) against")
 parser.add_argument("-o", "--output", help="file to write output to")
+#parser.add_argument("-e", "--expand", help="separate output into different files per server")
 options = parser.parse_args()
 
 #collect credentials
@@ -53,7 +54,7 @@ logging.basicConfig(level=logging.INFO, filename=log_file)
 #global functions
 def define_targets(*args):
     devices = []
-    for dev in args:
+    for dev in list(args):
         devices.append({
         "device_type" : "autodetect",
         "ip" : dev,
@@ -62,19 +63,12 @@ def define_targets(*args):
         })
     return devices
 
-def define_operations(*args):
-    commands = []
-    for cmd in args:
-        commands.append(cmd)
-    return commands
-
 def append_file(command, output):
     '''Append the command and output to the named file'''
     logging.info(f"command: {command}\noutput: {output}\n")
     return
 
 def thread_helper(thread_list):
-    #FIXME possible race conditions?
     count = 0
     while len(thread_list) > count:
         if count % concurrency == 0 and count!= 0:
@@ -85,7 +79,7 @@ def thread_helper(thread_list):
 
 def operate_on_targets(server, commands): #server string, commands list
     client = netmiko.ConnectHandler(**server)
-    host = server.get("host")
+    host = server.get("ip")
     print(f"Starting SSH Connection to {host}")
     print("commands", commands)
     print("server", server)
@@ -97,33 +91,34 @@ def operate_on_targets(server, commands): #server string, commands list
         #max_loops = 150
         #output = client.send_command_timing(command, delay_factor, max_loops)
         print(f"output received from {host}: {command}\n{output}")
-        logging.info(f"output received from {hsot}: {command}\n{output}")
+        logging.info(f"output received from {host}: {command}\n{output}")
     client.disconnect()
 
 def main():
     #define targets
-    if options.server:
-        devices = define_targets(*options.server)
-    elif options.servers:
-        with open(str(options.servers)) as f1:
-            devices = define_targets([x.strip() for x in f1.readlines()])
+    if options.server != None:
+        devices = define_targets(options.server)
+    elif options.servers != None:
+        with open(options.servers) as f:
+            devices = define_targets(*[x.strip() for x in f.readlines()])
     else:
         print("you must define a target server")
         exit()
 
     #define operations
-    if options.server:
-        commands = define_targets(*options.command)
-    elif options.servers:
-        with open(str(options.commands)) as f2:
-            commands = define_targets([x.strip() for x in f2.readlines()])
+    if options.command != None:
+        commands = []
+        commands.append(str(options.command))
+    elif options.commands != None:
+        with open(options.commands) as f:
+            commands = [x.strip() for x in f.readlines()]
     else:
         print("you must define an operation")
         exit()
 
     thread_list = []
+
     for server in devices:
-        print("!!!\n", server, "\n", commands, "\n")
         thread_list.append(threading.Thread(target=operate_on_targets, args=(server, commands)))
     thread_helper(thread_list)
 
