@@ -1,1 +1,2 @@
-lithium
+server1
+server2
