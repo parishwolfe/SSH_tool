@@ -24,7 +24,7 @@ lspci
 ```
 
 to specify a path for the output:    
-`python3 SSHtool.py --server server1 --command ifconfig --output /var/log/server_output.log`
+`python3 SSHtool.py --server server1 --command ifconfig --output /var/log/server_output.log`  
 to specify a higher number of concurrent connections:  
 `python3 SSHtool.py --server server1 --command ifconfig  --concurrency 20`
 
@@ -33,5 +33,6 @@ to specify a higher number of concurrent connections:
 default output file SSH_tool.log placed in current working directory  
 while running commands on multiple servers, the commands are executed concurrently via the multiprocessing module  
 default concurrent connections: 5  
+
 
 
